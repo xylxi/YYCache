@@ -8,6 +8,10 @@
 //  This source code is licensed under the MIT-style license found in the
 //  LICENSE file in the root directory of this source tree.
 //
+/**
+ 去掉了异步访问的接口，尽量优化了同步访问的性能，用 OSSpinLock 来保证线程安全。
+ 另外，缓存内部用双向链表和 NSDictionary 实现了 LRU 淘汰算法
+ */
 
 #import <Foundation/Foundation.h>
 
@@ -39,9 +43,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nullable, copy) NSString *name;
 
 /** The number of objects in the cache (read-only) */
+/** 缓存中对象总数 */
 @property (readonly) NSUInteger totalCount;
 
 /** The total cost of objects in the cache (read-only). */
+/** 缓存对象的总权重 */
 @property (readonly) NSUInteger totalCost;
 
 
@@ -75,6 +81,7 @@ NS_ASSUME_NONNULL_BEGIN
  This is not a strict limit—if an object goes over the limit, the object could 
  be evicted later in backgound thread.
  */
+/** 过期时间 */
 @property NSTimeInterval ageLimit;
 
 /**
@@ -83,6 +90,7 @@ NS_ASSUME_NONNULL_BEGIN
  @discussion The cache holds an internal timer to check whether the cache reaches 
  its limits, and if the limit is reached, it begins to evict objects.
  */
+/** 内部定时器自动检查缓存的时间间隔,如果缓存否达到其限，开始驱逐对象 */
 @property NSTimeInterval autoTrimInterval;
 
 /**
@@ -95,6 +103,7 @@ NS_ASSUME_NONNULL_BEGIN
  If `YES`, The cache will remove all objects when the app enter background.
  The default value is `YES`.
  */
+/** 应用进入后台后是否移除内存缓存，默认是YES */
 @property BOOL shouldRemoveAllObjectsWhenEnteringBackground;
 
 /**
@@ -192,6 +201,7 @@ NS_ASSUME_NONNULL_BEGIN
  the specified value.
  @param count  The total count allowed to remain after the cache has been trimmed.
  */
+/** 重新设置缓存对象的总数 */
 - (void)trimToCount:(NSUInteger)count;
 
 /**

@@ -29,11 +29,17 @@ static NSString *const kTrashDirectoryName = @"trash";
 /*
  SQL:
  create table if not exists manifest (
+    // 查找Key
     key                 text,
+    // 缓存数据的文件的文件名
     filename            text,
+    // 缓存的大小
     size                integer,
+    // 使用数据库保存的缓存数据
     inline_data         blob,
+    //
     modification_time   integer,
+    // 加入时间
     last_access_time    integer,
     extended_data       blob,
     primary key(key)
@@ -48,15 +54,16 @@ static NSString *const kTrashDirectoryName = @"trash";
     dispatch_queue_t _trashQueue;
     
     NSString *_path;
-    NSString *_dbPath;
+    NSString *_dbPath; ///< 数据库路径
     NSString *_dataPath;
     NSString *_trashPath;
     
-    sqlite3 *_db;
-    CFMutableDictionaryRef _dbStmtCache;
-    
-    BOOL _invalidated; ///< If YES, then the db should not open again, all read/write should be ignored.
-    BOOL _dbIsClosing; ///< If YES, then the db is during closing.
+    sqlite3 *_db;///< 数据库
+
+    CFMutableDictionaryRef _dbStmtCache; ///< 字典，存储数据库语句，相当于缓存sqlite3_stmt语句
+
+    BOOL _invalidated; ///< If YES, then the db should not open again, all read/write should be ignored. 如果该值为YES，数据库不应该再次被打开，所有的读写操作都被忽略
+    BOOL _dbIsClosing; ///< If YES, then the db is during closing. 如果该值是YES，数据库处于关闭期间
 }
 
 
@@ -85,6 +92,7 @@ static NSString *const kTrashDirectoryName = @"trash";
     }
 }
 
+/** 关闭数据库 */
 - (BOOL)_dbClose {
     BOOL needClose = YES;
     if (!_db) {
@@ -108,11 +116,21 @@ static NSString *const kTrashDirectoryName = @"trash";
     do {
         retry = NO;
         result = sqlite3_close(_db);
+        // 如果数据库处于繁忙或者锁住状态
         if (result == SQLITE_BUSY || result == SQLITE_LOCKED) {
             if (!stmtFinalized) {
                 stmtFinalized = YES;
                 sqlite3_stmt *stmt;
+                /**
+                 *  sqlite3_next_stmt函数
+                 *  表示从数据库pDb中对应的pStmt语句开始一个个往下找出相应prepared语句，
+                 *  如果pStmt为nil，那么就从pDb的第一个prepared语句开始。
+                 *  
+                 *  此处迭代找到数据库中所有prepared语句，释放其资源
+                 */
                 while ((stmt = sqlite3_next_stmt(_db, nil)) != 0) {
+                    // 最后调用sqlite3_finalize函数释放所有的内部资源和sqlite3_stmt数据结构，
+                    // 有效删除prepared语句
                     sqlite3_finalize(stmt);
                     retry = YES;
                 }
@@ -135,6 +153,7 @@ static NSString *const kTrashDirectoryName = @"trash";
     return [self _dbExecute:sql];
 }
 
+/** 这里不知道什么意思 */
 - (void)_dbCheckpoint {
     if (![self _dbIsReady]) return;
     // Cause a checkpoint to occur, merge `sqlite-wal` file to `sqlite` file.
@@ -155,15 +174,20 @@ static NSString *const kTrashDirectoryName = @"trash";
     return result == SQLITE_OK;
 }
 
+/** 根据SQL字符串获取对应的prepare语句sqlite3_stmt*/
 - (sqlite3_stmt *)_dbPrepareStmt:(NSString *)sql {
     if (![self _dbIsReady] || sql.length == 0 || !_dbStmtCache) return NULL;
+    // 从sqlite语句缓存中取语句，防止对sqlite3_prepare_v2函数的多次访问
     sqlite3_stmt *stmt = (sqlite3_stmt *)CFDictionaryGetValue(_dbStmtCache, (__bridge const void *)(sql));
     if (!stmt) {
+        // 如果缓存中没有sql对应的prepared语句，那么只能使用sqlite3_prepare_v2函数进行预处理
+        
         int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
         if (result != SQLITE_OK) {
             if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
             return NULL;
         }
+        // sqlite3_prepare_v2代价很大，所以要缓存
         CFDictionarySetValue(_dbStmtCache, (__bridge const void *)(sql), stmt);
     } else {
         sqlite3_reset(stmt);
@@ -188,7 +212,7 @@ static NSString *const kTrashDirectoryName = @"trash";
         sqlite3_bind_text(stmt, index + i, key.UTF8String, -1, NULL);
     }
 }
-
+/** 最终存储的数据方法 */
 - (BOOL)_dbSaveWithKey:(NSString *)key value:(NSData *)value fileName:(NSString *)fileName extendedData:(NSData *)extendedData {
     NSString *sql = @"insert or replace into manifest (key, filename, size, inline_data, modification_time, last_access_time, extended_data) values (?1, ?2, ?3, ?4, ?5, ?6, ?7);";
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
@@ -215,6 +239,7 @@ static NSString *const kTrashDirectoryName = @"trash";
     return YES;
 }
 
+/** 更新缓存数据的时间 */
 - (BOOL)_dbUpdateAccessTimeWithKey:(NSString *)key {
     NSString *sql = @"update manifest set last_access_time = ?1 where key = ?2;";
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
@@ -250,7 +275,7 @@ static NSString *const kTrashDirectoryName = @"trash";
     }
     return YES;
 }
-
+/** 根据key删除数据库的数据 */
 - (BOOL)_dbDeleteItemWithKey:(NSString *)key {
     NSString *sql = @"delete from manifest where key = ?1;";
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
@@ -334,7 +359,10 @@ static NSString *const kTrashDirectoryName = @"trash";
     return item;
 }
 
+/** 也就是说缓存数据是保存在文件还是数据库的inline_data中 */
 - (YYKVStorageItem *)_dbGetItemWithKey:(NSString *)key excludeInlineData:(BOOL)excludeInlineData {
+    // 如果YES就排除inline_data
+    // 否则包含     inline_data
     NSString *sql = excludeInlineData ? @"select key, filename, size, modification_time, last_access_time, extended_data from manifest where key = ?1;" : @"select key, filename, size, inline_data, modification_time, last_access_time, extended_data from manifest where key = ?1;";
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return nil;
@@ -510,16 +538,23 @@ static NSString *const kTrashDirectoryName = @"trash";
     return filenames;
 }
 
+/**
+ *  按加入last_access_time时间升序获取对象
+ *  @param count 获取个数
+ */
 - (NSMutableArray *)_dbGetItemSizeInfoOrderByTimeAscWithLimit:(int)count {
     NSString *sql = @"select key, filename, size from manifest order by last_access_time asc limit ?1;";
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return nil;
+    // sqlite3_bind_int为准备语句绑定参数
+    // 函数中第二个参数是绑定参数的编号，此编号从1开始，而不是从0开始
     sqlite3_bind_int(stmt, 1, count);
     
     NSMutableArray *items = [NSMutableArray new];
     do {
         int result = sqlite3_step(stmt);
         if (result == SQLITE_ROW) {
+            // 可以通过sqlite3_column函数提取某列的值
             char *key = (char *)sqlite3_column_text(stmt, 0);
             char *filename = (char *)sqlite3_column_text(stmt, 1);
             int size = sqlite3_column_int(stmt, 2);
@@ -553,14 +588,21 @@ static NSString *const kTrashDirectoryName = @"trash";
 }
 
 - (int)_dbGetTotalItemSize {
+    /** 获得表manifest中size的总数 */
     NSString *sql = @"select sum(size) from manifest;";
+    /** 获取sqlite3_stmt语句 */
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return -1;
+    // sqlite_prepare函数，sql语句字符串转换为一系列的命令字节码
+    // sqlite_step一次一次的去调用命令，知道没有有效数据行
     int result = sqlite3_step(stmt);
+    // SQLITE_ROW，代表获得了有效数据行
+    // SQLITE_DONE，则代表prepared语句已经执行到终点了，没有有效数据了
     if (result != SQLITE_ROW) {
         if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
         return -1;
     }
+    // 可以通过sqlite3_column函数提取某列的值
     return sqlite3_column_int(stmt, 0);
 }
 
@@ -585,6 +627,7 @@ static NSString *const kTrashDirectoryName = @"trash";
     return [data writeToFile:path atomically:NO];
 }
 
+/** 从文件中读取缓存数据 */
 - (NSData *)_fileReadWithName:(NSString *)filename {
     if (_invalidated) return nil;
     NSString *path = [_dataPath stringByAppendingPathComponent:filename];
@@ -592,20 +635,24 @@ static NSString *const kTrashDirectoryName = @"trash";
     return data;
 }
 
+/** 删除制定名字的文件 */
 - (BOOL)_fileDeleteWithName:(NSString *)filename {
     if (_invalidated) return NO;
     NSString *path = [_dataPath stringByAppendingPathComponent:filename];
     return [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
 }
 
+/** 将文件移到垃圾箱 */
 - (BOOL)_fileMoveAllToTrash {
     if (_invalidated) return NO;
     CFUUIDRef uuidRef = CFUUIDCreate(NULL);
     CFStringRef uuid = CFUUIDCreateString(NULL, uuidRef);
     CFRelease(uuidRef);
     NSString *tmpPath = [_trashPath stringByAppendingPathComponent:(__bridge NSString *)(uuid)];
+    // 将dataPath路径文件夹移动到tmpPath路径文件夹下 ?????
     BOOL suc = [[NSFileManager defaultManager] moveItemAtPath:_dataPath toPath:tmpPath error:nil];
     if (suc) {
+        // 重新创建路径_dataPath文件夹
         suc = [[NSFileManager defaultManager] createDirectoryAtPath:_dataPath withIntermediateDirectories:YES attributes:nil error:NULL];
     }
     CFRelease(uuid);
@@ -632,12 +679,17 @@ static NSString *const kTrashDirectoryName = @"trash";
 /**
  Delete all files and empty in background.
  Make sure the db is closed.
+ 重置函数
+ 重置所有文件
  */
 - (void)_reset {
+    // 删除数据库文件
     [[NSFileManager defaultManager] removeItemAtPath:[_path stringByAppendingPathComponent:kDBFileName] error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:[_path stringByAppendingPathComponent:kDBShmFileName] error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:[_path stringByAppendingPathComponent:kDBWalFileName] error:nil];
+    // 将文件移动到垃圾箱
     [self _fileMoveAllToTrash];
+    // 删除_trashPath文件夹内到文件
     [self _fileEmptyTrashInBackground];
 }
 
@@ -715,12 +767,24 @@ static NSString *const kTrashDirectoryName = @"trash";
     return [self saveItemWithKey:key value:value filename:nil extendedData:nil];
 }
 
+/**
+ *  保存数据
+ *
+ *  @param key          数据库中对应的key
+ *  @param value        要保存的数据
+ *  @param filename     如果保存到文件，需要有文件名
+ *  @param extendedData <#extendedData description#>
+ *
+ *  @return <#return value description#>
+ */
 - (BOOL)saveItemWithKey:(NSString *)key value:(NSData *)value filename:(NSString *)filename extendedData:(NSData *)extendedData {
     if (key.length == 0 || value.length == 0) return NO;
+    // 如果采用的是文件保存，则必须要给文件名
     if (_type == YYKVStorageTypeFile && filename.length == 0) {
         return NO;
     }
     
+    // 如果给了filename，说明使用文件存储
     if (filename.length) {
         if (![self _fileWriteWithName:filename data:value]) {
             return NO;
@@ -740,6 +804,8 @@ static NSString *const kTrashDirectoryName = @"trash";
         return [self _dbSaveWithKey:key value:value fileName:nil extendedData:extendedData];
     }
 }
+
+#pragma mark - 删除缓存
 
 - (BOOL)removeItemForKey:(NSString *)key {
     if (key.length == 0) return NO;
@@ -803,6 +869,7 @@ static NSString *const kTrashDirectoryName = @"trash";
     return NO;
 }
 
+/** 删除时间早于time的缓存数据 */
 - (BOOL)removeItemsEarlierThanTime:(int)time {
     if (time <= 0) return YES;
     if (time == INT_MAX) return [self removeAllItems];
@@ -833,10 +900,12 @@ static NSString *const kTrashDirectoryName = @"trash";
     if (maxSize == INT_MAX) return YES;
     if (maxSize <= 0) return [self removeAllItems];
     
+    // 获取数据库中存储的数据个数
     int total = [self _dbGetTotalItemSize];
     if (total < 0) return NO;
     if (total <= maxSize) return YES;
     
+    // 如果total > maxSize，需要调整
     NSArray *items = nil;
     BOOL suc = NO;
     do {
@@ -844,9 +913,11 @@ static NSString *const kTrashDirectoryName = @"trash";
         items = [self _dbGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
         for (YYKVStorageItem *item in items) {
             if (total > maxSize) {
+                // 1.先清除文件
                 if (item.filename) {
                     [self _fileDeleteWithName:item.filename];
                 }
+                // 2.在清除数据库中的数据
                 suc = [self _dbDeleteItemWithKey:item.key];
                 total -= item.size;
             } else {
@@ -890,8 +961,11 @@ static NSString *const kTrashDirectoryName = @"trash";
 }
 
 - (BOOL)removeAllItems {
+    // 先关闭数据库
     if (![self _dbClose]) return NO;
+    // 重置文件(数据库和文件)
     [self _reset];
+    // 初始化数据库
     if (![self _dbOpen]) return NO;
     if (![self _dbInitialize]) return NO;
     return YES;
@@ -929,11 +1003,22 @@ static NSString *const kTrashDirectoryName = @"trash";
     }
 }
 
+#pragma mark - 获取缓存
+/**
+ *  数据库中 inline_data
+ *  根据 getItemValueForKey: 方法中_type --> YYKVStorageTypeSQLite的时候
+ *  返回 inline_data，说明inline_data是缓存的数据
+ *  也就是说，缓存有可能保存在文件中，也有可能保存在inline_data中
+ */
+
 - (YYKVStorageItem *)getItemForKey:(NSString *)key {
     if (key.length == 0) return nil;
+    // 找到不包含inline_data的数据
     YYKVStorageItem *item = [self _dbGetItemWithKey:key excludeInlineData:NO];
     if (item) {
+        // 在数据库中更新这条数据的时间
         [self _dbUpdateAccessTimeWithKey:key];
+        // 如果有文件名，说明数据保存在文件
         if (item.filename) {
             item.value = [self _fileReadWithName:item.filename];
             if (!item.value) {

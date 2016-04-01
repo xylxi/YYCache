@@ -21,6 +21,7 @@
 static const int extended_data_key;
 
 /// Free disk space in bytes.
+// 手机的可用存储的大小
 static int64_t _YYDiskSpaceFree() {
     NSError *error = nil;
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:NSHomeDirectory() error:&error];
@@ -46,9 +47,13 @@ static NSString *_YYNSStringMD5(NSString *string) {
 }
 
 /// weak reference for all instances
+// NSMapTable是一个可以存在weak引用的NSDictionry
+// 不会去持用set进来的对象
 static NSMapTable *_globalInstances;
+// 信号量
 static dispatch_semaphore_t _globalInstancesLock;
 
+/** 创建单例_globalInstances和_globalInstancesLock */
 static void _YYDiskCacheInitGlobal() {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -57,15 +62,23 @@ static void _YYDiskCacheInitGlobal() {
     });
 }
 
+/**
+ *  根据path获取到cache对象
+ *  @param path cache的路径
+ *  @return cache
+ */
 static YYDiskCache *_YYDiskCacheGetGlobal(NSString *path) {
     if (path.length == 0) return nil;
     _YYDiskCacheInitGlobal();
+    // 等待信号量
     dispatch_semaphore_wait(_globalInstancesLock, DISPATCH_TIME_FOREVER);
+    // 根据path，拿到缓存？
     id cache = [_globalInstances objectForKey:path];
+    // 释放信号量
     dispatch_semaphore_signal(_globalInstancesLock);
     return cache;
 }
-
+/** set cache对象 */
 static void _YYDiskCacheSetGlobal(YYDiskCache *cache) {
     if (cache.path.length == 0) return;
     _YYDiskCacheInitGlobal();
@@ -78,10 +91,11 @@ static void _YYDiskCacheSetGlobal(YYDiskCache *cache) {
 
 @implementation YYDiskCache {
     YYKVStorage *_kv;
-    dispatch_semaphore_t _lock;
-    dispatch_queue_t _queue;
+    dispatch_semaphore_t _lock ;
+    dispatch_queue_t     _queue;
 }
 
+/** 在间隔_autoTrimInterval时间内容自动检查调整缓存 */
 - (void)_trimRecursively {
     __weak typeof(self) _self = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_autoTrimInterval * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
@@ -214,6 +228,13 @@ static void _YYDiskCacheSetGlobal(YYDiskCache *cache) {
     });
 }
 
+/**
+ *  <#Description#>
+ *
+ *  @param key <#key description#>
+ *
+ *  @return <#return value description#>
+ */
 - (id<NSCoding>)objectForKey:(NSString *)key {
     if (!key) return nil;
     Lock();

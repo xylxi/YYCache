@@ -8,6 +8,9 @@
 //  This source code is licensed under the MIT-style license found in the
 //  LICENSE file in the root directory of this source tree.
 //
+/**
+ *  YYDiskCache 也是采用的 SQLite 配合文件的存储方式
+ */
 
 #import <Foundation/Foundation.h>
 
@@ -50,6 +53,7 @@ NS_ASSUME_NONNULL_BEGIN
  
  The default value is 20480 (20KB).
  */
+// 根据这个属性判断是使用sqlite(小数据)存储还是文件(大数据)存储，单位字节
 @property (readonly) NSUInteger inlineThreshold;
 
 /**
@@ -85,6 +89,15 @@ NS_ASSUME_NONNULL_BEGIN
 ///=============================================================================
 /// @name Limit
 ///=============================================================================
+
+/*
+ *      总共有5个限制
+ * 1、个数限制
+ * 2、权重限制
+ * 3、对象存活时间限制
+ * 4、可用磁盘空间限制
+ * 5、自动检查间隔的时间
+ */
 
 /**
  The maximum number of objects the cache should hold.

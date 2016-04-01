@@ -155,6 +155,7 @@ typedef NS_ENUM(NSUInteger, YYKVStorageType) {
  
  @return Whether succeed.
  */
+
 - (BOOL)saveItemWithKey:(NSString *)key
                   value:(NSData *)value
                filename:(nullable NSString *)filename
@@ -222,6 +223,13 @@ typedef NS_ENUM(NSUInteger, YYKVStorageType) {
  @discussion This method will remove the files and sqlite database to a trash
  folder, and then clear the folder in background queue. So this method is much 
  faster than `removeAllItemsWithProgressBlock:endBlock:`.
+ 
+ 此方法将文件和SQLite数据库中删除到回收站文件夹，
+ 然后清除后台队列中的文件夹。
+ 因此，这种方法比`removeAllItemsWithProgressBlock:endBlock:`快得多
+ *  删除所有缓存
+ *  1. 重置所有文件
+ *  2. 重置数据库
  
  @return Whether succeed.
  */

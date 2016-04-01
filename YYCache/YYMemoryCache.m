@@ -24,6 +24,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
  A node in linked map.
  Typically, you should not use this class directly.
  */
+/** 节点结构体 */
 @interface _YYLinkedMapNode : NSObject {
     @package
     __unsafe_unretained _YYLinkedMapNode *_prev; // retained by dic
@@ -31,6 +32,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     id _key;
     id _value;
     NSUInteger _cost;
+    /** 该节点的时间 */
     NSTimeInterval _time;
 }
 @end
@@ -45,8 +47,10 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
  
  Typically, you should not use this class directly.
  */
+/** 链表 */
 @interface _YYLinkedMap : NSObject {
     @package
+    /** CF的可变字典,用于保存链表的所有节点的(key=value) */
     CFMutableDictionaryRef _dic; // do not set object directly
     NSUInteger _totalCost;
     NSUInteger _totalCount;
@@ -58,10 +62,12 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
 
 /// Insert a node at head and update the total cost.
 /// Node and node.key should not be nil.
+/// 前插发插入节点
 - (void)insertNodeAtHead:(_YYLinkedMapNode *)node;
 
 /// Bring a inner node to header.
 /// Node should already inside the dic.
+/// 将链表中的node节点调到头节点位置
 - (void)bringNodeToHead:(_YYLinkedMapNode *)node;
 
 /// Remove a inner node and update the total cost.
@@ -80,6 +86,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
 
 - (instancetype)init {
     self = [super init];
+    /** CoretFoundation中字典的创建方法 */
     _dic = CFDictionaryCreateMutable(CFAllocatorGetDefault(), 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     _releaseOnMainThread = NO;
     _releaseAsynchronously = YES;
@@ -91,9 +98,11 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
 }
 
 - (void)insertNodeAtHead:(_YYLinkedMapNode *)node {
+    //  类似于NSMutableDictionary的set方法
     CFDictionarySetValue(_dic, (__bridge const void *)(node->_key), (__bridge const void *)(node));
     _totalCost += node->_cost;
     _totalCount++;
+    //  前插法
     if (_head) {
         node->_next = _head;
         _head->_prev = node;
@@ -129,6 +138,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     if (_tail == node) _tail = node->_prev;
 }
 
+/** 删除队尾*/
 - (_YYLinkedMapNode *)removeTailNode {
     if (!_tail) return nil;
     _YYLinkedMapNode *tail = _tail;
@@ -151,8 +161,9 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     _tail = nil;
     if (CFDictionaryGetCount(_dic) > 0) {
         CFMutableDictionaryRef holder = _dic;
+        /** 初始化_dic字典 */
         _dic = CFDictionaryCreateMutable(CFAllocatorGetDefault(), 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        
+        // 释放原来的字典
         if (_releaseAsynchronously) {
             dispatch_queue_t queue = _releaseOnMainThread ? dispatch_get_main_queue() : YYMemoryCacheGetReleaseQueue();
             dispatch_async(queue, ^{
@@ -173,21 +184,28 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
 
 
 @implementation YYMemoryCache {
+    // pthread_mutex_t 互斥锁
     pthread_mutex_t _lock;
+    // 链表
     _YYLinkedMap *_lru;
+    // 串行队列
     dispatch_queue_t _queue;
 }
 
+/** 定时修整内存缓存*/
 - (void)_trimRecursively {
     __weak typeof(self) _self = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_autoTrimInterval * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         __strong typeof(_self) self = _self;
         if (!self) return;
+        // 清除超过上限的缓存对象
         [self _trimInBackground];
+        // 5秒一循环
         [self _trimRecursively];
     });
 }
 
+/** 修整*/
 - (void)_trimInBackground {
     dispatch_async(_queue, ^{
         [self _trimToCost:self->_costLimit];
@@ -196,6 +214,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     });
 }
 
+/** 通过权重调整 */
 - (void)_trimToCost:(NSUInteger)costLimit {
     BOOL finish = NO;
     pthread_mutex_lock(&_lock);
@@ -230,6 +249,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     }
 }
 
+/** 通过对象个数调整 */
 - (void)_trimToCount:(NSUInteger)countLimit {
     BOOL finish = NO;
     pthread_mutex_lock(&_lock);
@@ -264,6 +284,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     }
 }
 
+/** 通过过期时间调整 */
 - (void)_trimToAge:(NSTimeInterval)ageLimit {
     BOOL finish = NO;
     NSTimeInterval now = CACurrentMediaTime();
@@ -318,15 +339,18 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
 }
 
 #pragma mark - public
-
+/** 初始化 */
 - (instancetype)init {
     self = super.init;
+    // 初始化互斥所
     pthread_mutex_init(&_lock, NULL);
+    // 初始化链表
     _lru = [_YYLinkedMap new];
     _queue = dispatch_queue_create("com.ibireme.cache.memory", DISPATCH_QUEUE_SERIAL);
     
     _countLimit = NSUIntegerMax;
     _costLimit = NSUIntegerMax;
+    // 存活时间
     _ageLimit = DBL_MAX;
     _autoTrimInterval = 5.0;
     _shouldRemoveAllObjectsOnMemoryWarning = YES;
@@ -388,12 +412,15 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
 
 - (BOOL)containsObjectForKey:(id)key {
     if (!key) return NO;
+    // 加锁
     pthread_mutex_lock(&_lock);
     BOOL contains = CFDictionaryContainsKey(_lru->_dic, (__bridge const void *)(key));
+    // 解锁
     pthread_mutex_unlock(&_lock);
     return contains;
 }
 
+/** 如果再次根据key使用对象，那么将对象调整的时间并且调整改对象节点链表头部，返回该对象*/
 - (id)objectForKey:(id)key {
     if (!key) return nil;
     pthread_mutex_lock(&_lock);
@@ -410,6 +437,13 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     [self setObject:object forKey:key withCost:0];
 }
 
+/**
+ *  缓存对象
+ *
+ *  @param object 需要缓存的对象
+ *  @param key    key
+ *  @param cost   权重
+ */
 - (void)setObject:(id)object forKey:(id)key withCost:(NSUInteger)cost {
     if (!key) return;
     if (!object) {
@@ -417,8 +451,10 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
         return;
     }
     pthread_mutex_lock(&_lock);
+    
     _YYLinkedMapNode *node = CFDictionaryGetValue(_lru->_dic, (__bridge const void *)(key));
     NSTimeInterval now = CACurrentMediaTime();
+    // 如果链表中已经存在了对应key的节点，那么改变节点内的属性，并且调整到链表头部
     if (node) {
         _lru->_totalCost -= node->_cost;
         _lru->_totalCost += cost;
@@ -427,6 +463,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
         node->_value = object;
         [_lru bringNodeToHead:node];
     } else {
+        // 如果没有将创建新的节点
         node = [_YYLinkedMapNode new];
         node->_cost = cost;
         node->_time = now;
@@ -434,6 +471,8 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
         node->_value = object;
         [_lru insertNodeAtHead:node];
     }
+    
+    // 调整缓存
     if (_lru->_totalCost > _costLimit) {
         dispatch_async(_queue, ^{
             [self trimToCost:_costLimit];

@@ -1,0 +1,11 @@
+1. 在异步并行队列中，使用同步操作
+dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_autoTrimInterval * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        __strong typeof(_self) self = _self;
+        do something;
+        dispatch_async(_queue, ^{
+            do something;
+        });
+});
+
+2. sqlite语句的部分解释
+http://www.cnblogs.com/polobymulberry/p/5178770.html
