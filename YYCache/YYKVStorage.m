@@ -52,7 +52,7 @@ static NSString *const kTrashDirectoryName = @"trash";
 
 @implementation YYKVStorage {
     dispatch_queue_t _trashQueue;
-    
+
     NSString *_path;
     NSString *_dbPath; ///< 数据库路径
     NSString *_dataPath;
@@ -62,7 +62,7 @@ static NSString *const kTrashDirectoryName = @"trash";
 
     CFMutableDictionaryRef _dbStmtCache; ///< 字典，存储数据库语句，相当于缓存sqlite3_stmt语句
 
-    BOOL _invalidated; ///< If YES, then the db should not open again, all read/write should be ignored. 如果该值为YES，数据库不应该再次被打开，所有的读写操作都被忽略
+    BOOL _invalidated; ///< s 如果该值为YES，数据库不应该再次被打开，所有的读写操作都被忽略
     BOOL _dbIsClosing; ///< If YES, then the db is during closing. 如果该值是YES，数据库处于关闭期间
 }
 
@@ -766,7 +766,7 @@ static NSString *const kTrashDirectoryName = @"trash";
 - (BOOL)saveItemWithKey:(NSString *)key value:(NSData *)value {
     return [self saveItemWithKey:key value:value filename:nil extendedData:nil];
 }
-
+ 
 /**
  *  保存数据
  *

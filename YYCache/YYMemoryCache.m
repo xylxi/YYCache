@@ -478,6 +478,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
             [self trimToCost:_costLimit];
         });
     }
+    
     if (_lru->_totalCount > _countLimit) {
         _YYLinkedMapNode *node = [_lru removeTailNode];
         if (_lru->_releaseAsynchronously) {

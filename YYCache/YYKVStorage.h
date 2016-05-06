@@ -178,7 +178,7 @@ typedef NS_ENUM(NSUInteger, YYKVStorageType) {
  Remove items with an array of keys.
  
  @param keys An array of specified keys.
- 
+ X
  @return Whether succeed.
  */
 - (BOOL)removeItemForKeys:(NSArray<NSString *> *)keys;

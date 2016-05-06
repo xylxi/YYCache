@@ -18,6 +18,9 @@
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     // Override point for customization after application launch.
     NSLog(@"%@",NSHomeDirectory());
+    NSURLCache *rulCache = [[NSURLCache alloc] initWithMemoryCapacity:1000 diskCapacity:1000 diskPath:@"dfdf"];
+    [NSURLCache setSharedURLCache:rulCache];
+    
     
     return YES;
 }
